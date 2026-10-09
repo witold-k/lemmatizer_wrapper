@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Witold Kaminski
 
 use crate::{config::SpacyConfig, error::{Error, Result}, spacy};
-use std::{fs, path::{Path, PathBuf}};
+use std::{fs, path::Path};
 use token_db::{TokenDb, TokenId};
 
 pub fn save_token_stream(path: &Path, ids: &[TokenId]) -> Result<()> {
@@ -35,7 +35,7 @@ pub fn process_document(config: &SpacyConfig, input: &Path, token_output: &Path)
 }
 
 pub fn globalize(token_input: &Path, global: &TokenDb) -> Result<()> {
-    let local = TokenDb::load(&token_input.with_extension("tdb"))?;
+    let local = TokenDb::load(token_input.with_extension("tdb"))?;
     let mapping = local.iter().map(|(_, entry)| {
         global.id(entry.text()).ok_or_else(|| Error::MissingGlobalToken(entry.text().to_owned()))
     }).collect::<Result<Vec<_>>>()?;
