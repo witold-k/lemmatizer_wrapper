@@ -3,6 +3,7 @@
 
 pub mod backend;
 pub mod config;
+pub mod corpus;
 pub mod error;
 pub mod spacy;
 
