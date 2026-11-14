@@ -5,7 +5,7 @@ use lemmatizer_wrapper::{backend::{lemmatize, LemmatizerBackend}, config::Config
 use std::path::Path;
 
 fn usage() {
-    eprintln!("Usage: lemmatizer_wrapper [spacy] <input.md|input_dir> <output.json|output_dir>");
+    eprintln!("Usage: lemmatizer_wrapper [spacy] <input_file|input_dir> <output.json|output_dir>");
 }
 
 fn main() -> Result<()> {
@@ -18,9 +18,12 @@ fn main() -> Result<()> {
     };
     let input = Path::new(input);
     let output = Path::new(output);
+    config.scan_extensions()?;
     if input.is_dir() {
-        corpus::process_corpus(&config.spacy, input, output)
-    } else {
+        corpus::process_corpus(&config, input, output)
+    } else if config.accepts(input) {
         lemmatize(&config, backend, input, output)
+    } else {
+        Err(lemmatizer_wrapper::Error::InvalidPath(input.to_path_buf()))
     }
 }

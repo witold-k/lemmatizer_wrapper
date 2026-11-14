@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Witold Kaminski
 
-use crate::{config::SpacyConfig, error::{Error, Result}, spacy};
+use crate::{config::{Config, SpacyConfig}, error::{Error, Result}, spacy};
 use std::{fs, path::Path};
 use token_db::{TokenDb, TokenId};
 
@@ -47,6 +47,18 @@ pub fn globalize(token_input: &Path, global: &TokenDb) -> Result<()> {
     save_token_stream(&token_input.with_file_name(format!("{stem}_glob.tok")), &ids)
 }
 
+/// Preserve Markdown naming and avoid clashes with other source formats.
+pub fn mapped_token_output(source: &Path, scanner_output: &Path, output_extension: &str) -> Result<std::path::PathBuf> {
+    let extension = source.extension().and_then(|value| value.to_str())
+        .ok_or_else(|| Error::InvalidPath(source.to_path_buf()))?;
+    let base = scanner_output.file_stem().and_then(|value| value.to_str())
+        .ok_or_else(|| Error::InvalidPath(scanner_output.to_path_buf()))?;
+    if extension.eq_ignore_ascii_case("md") {
+        return Ok(scanner_output.to_path_buf());
+    }
+    Ok(scanner_output.with_file_name(format!("{base}.{extension}.{output_extension}")))
+}
+
 fn stale(input: &Path, output: &Path) -> Result<bool> {
     let modified = fs::metadata(input)?.modified()?;
     match fs::metadata(output) {
@@ -56,28 +68,33 @@ fn stale(input: &Path, output: &Path) -> Result<bool> {
     }
 }
 
-/// First pass: each Markdown document produces its own token stream, database and annotations.
+/// First pass: each configured UTF-8 document produces its token stream, database and annotations.
 /// Second pass: merge databases and translate local streams to corpus-global IDs.
-pub fn process_corpus(config: &SpacyConfig, input: &Path, output: &Path) -> Result<()> {
+pub fn process_corpus(config: &Config, input: &Path, output: &Path) -> Result<()> {
     if !input.is_dir() { return Err(Error::InvalidPath(input.to_path_buf())); }
     fs::create_dir_all(output)?;
     let input_str = input.to_str().ok_or_else(|| Error::InvalidPath(input.to_path_buf()))?;
     let output_str = output.to_str().ok_or_else(|| Error::InvalidPath(output.to_path_buf()))?;
-    let cfg = config.clone();
-    fsscanner::fsscanner_mt::process_dir_map_with_workers(
-        input_str, output_str, "md", "tok", 1,
-        move |source, dest| {
-            let run = || -> Result<()> {
-                if stale(source, dest)?
-                    || stale(source, &dest.with_extension("tdb"))?
-                    || stale(source, &dest.with_extension("json"))? {
-                    process_document(&cfg, source, dest)?;
-                }
-                Ok(())
-            };
-            run().map_err(|e| fsscanner::Error::Processing(vec![e.to_string()]))
-        },
-    )?;
+    let extensions = config.scan_extensions()?;
+    for extension in &extensions {
+        let cfg = config.spacy.clone();
+        fsscanner::fsscanner_mt::process_dir_map_with_workers(
+            input_str, output_str, extension, "tok", 1,
+            move |source, dest| {
+                let run = || -> Result<()> {
+                    let dest = mapped_token_output(source, dest, "tok")?;
+                    if stale(source, &dest)?
+                        || stale(source, &dest.with_extension("tdb"))?
+                        || stale(source, &dest.with_extension("json"))?
+                    {
+                        process_document(&cfg, source, &dest)?;
+                    }
+                    Ok(())
+                };
+                run().map_err(|e| fsscanner::Error::Processing(vec![e.to_string()]))
+            },
+        )?;
+    }
     let mut paths = Vec::new();
     fsscanner::fsscanner_base::collect_files_fast(output, "tdb", &mut paths);
     paths.retain(|p| p.file_name().is_some_and(|n| n != "token_db.tdb"));
